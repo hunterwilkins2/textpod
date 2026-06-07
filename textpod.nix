@@ -5,6 +5,9 @@
   textpod,
   ...
 }:
+let
+  cfg = config.services.textpod;
+in
 {
   options = {
     services.textpod = {
@@ -24,16 +27,25 @@
         description = "Textpod user";
         default = "root";
       };
+      group = lib.mkOption {
+        type = lib.types.str;
+        description = "Textpod group";
+        default = "textpod";
+      };
     };
   };
 
-  config = lib.mkIf config.services.textpod.enable {
+  config = lib.mkIf cfg.enable {
     environment.systemPackages = [
       textpod
     ];
 
+    users.groups = lib.optionalAttrs (cfg.group == "textpod") {
+      textpod = { };
+    };
+
     systemd.tmpfiles.rules = [
-      "d ${config.services.textpod.directory} 0755 ${config.services.textpod.user} ${config.services.textpod.user} - -"
+      "d ${cfg.directory} 0755 ${cfg.user} ${cfg.group} - -"
     ];
 
     systemd.services.textpod = {
@@ -41,15 +53,15 @@
       wantedBy = [ "multi-user.target" ];
       serviceConfig = {
         Type = "simple";
-        ExecStart = "${textpod}/bin/textpod -p ${builtins.toString config.services.textpod.port}";
-        User = config.services.textpod.user;
-        Group = config.services.textpod.user;
+        ExecStart = "${textpod}/bin/textpod -p ${builtins.toString cfg.port}";
+        User = cfg.user;
+        Group = cfg.group;
         Restart = "always";
         AmbientCapabilities = "";
         CapabilityBoundingSet = "";
         LockPersonality = true;
         MemoryDenyWriteExecute = false;
-        ReadWritePaths = config.services.textpod.directory;
+        ReadWritePaths = cfg.directory;
         MountAPIVFS = true;
         NoNewPrivileges = true;
         PrivateDevices = true;
