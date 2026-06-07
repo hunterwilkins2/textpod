@@ -12,6 +12,11 @@ in
   options = {
     services.textpod = {
       enable = lib.mkEnableOption "Enable textpod web service";
+      host = lib.mkOption {
+        type = lib.types.str;
+        description = "Host address to listen on";
+        default = "0.0.0.0";
+      };
       port = lib.mkOption {
         type = lib.types.port;
         description = "Textpod web service port";
@@ -53,7 +58,7 @@ in
       wantedBy = [ "multi-user.target" ];
       serviceConfig = {
         Type = "simple";
-        ExecStart = "${textpod}/bin/textpod -p ${builtins.toString cfg.port}";
+        ExecStart = "${textpod}/bin/textpod -l ${cfg.host} -p ${builtins.toString cfg.port}";
         User = cfg.user;
         Group = cfg.group;
         Restart = "always";
