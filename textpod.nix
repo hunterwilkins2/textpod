@@ -49,7 +49,7 @@
         CapabilityBoundingSet = "";
         LockPersonality = true;
         MemoryDenyWriteExecute = false;
-        WorkingDirectory = config.services.textpod.directory;
+        ReadWritePaths = config.services.textpod.directory;
         MountAPIVFS = true;
         NoNewPrivileges = true;
         PrivateDevices = true;
