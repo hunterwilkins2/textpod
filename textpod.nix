@@ -61,6 +61,7 @@ in
         CapabilityBoundingSet = "";
         LockPersonality = true;
         MemoryDenyWriteExecute = false;
+        WorkingDirectory = cfg.directory;
         ReadWritePaths = cfg.directory;
         MountAPIVFS = true;
         NoNewPrivileges = true;
