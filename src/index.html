@@ -56,6 +56,19 @@
             cursor: pointer;
         }
 
+        #cancelButton {
+            font-family: monospace;
+            padding: 0.4em 1em;
+            background-color: none;
+            color: var(--color-secondary);
+            border: 1px solid var(--color-text-secondary);
+            cursor: pointer;
+        }
+
+        .hidden {
+            display: none;
+        }
+
         .note> :first-child {
             margin-top: 0;
         }
@@ -83,6 +96,10 @@
         .note .noteMetadata a:hover {
             text-decoration: underline;
         }
+
+	    .note .noteMetadata textarea {
+	        display: hidden;
+	    }
 
         .note code {
             padding: 0.25em;
@@ -114,7 +131,10 @@
 
     <textarea id="editor"
         placeholder="{{SAVE_SHORTCUT_DISPLAY}} to save.&#10;Type / to search.&#10;Drag & drop files to attach.&#10;Start links with + to save local copies."></textarea>
-    <div id="submitContainer"><button id="submitButton">Submit</button></div>
+    <div id="submitContainer">
+      <button id="cancelButton" class="hidden">Cancel</button>
+      <button id="submitButton">Submit</button>
+    </div>
     <div id="notes"></div>
 
     <script>
@@ -136,7 +156,9 @@
         const editor = document.getElementById('editor');
         const notesDiv = document.getElementById('notes');
         const submitButton = document.getElementById('submitButton');
+        const cancelButton = document.getElementById('cancelButton');
         let searchTimeout = null;
+        let editNoteIdx = null;
 
         window.addEventListener('load', async () => {
             displayNotes();
@@ -156,7 +178,9 @@
                         ${note.html}
                         <div class="noteMetadata">
                             <time datetime="${note.timestamp}">${note.timestamp}</time>
+                            [<a href="#" onclick="editNote(${i})">edit</a>]
                             [<a href="#" onclick="deleteNote(${i})">delete</a>]
+			                <textarea id="${i}-contents" class="hidden" disabled readonly>${note.content}</textarea>
                         </div>
                     </div>`)
                     .reverse() // TODO implement user-specified sorting (reverse chronological by default)
@@ -169,8 +193,10 @@
             if (!editor.value) {
                 return;
             }
-            const saveResponse = await fetch('/notes', {
-                method: 'POST',
+
+            const saveUrl = '/notes' + (editNoteIdx !== null ? `/${editNoteIdx}` : '')
+            const saveResponse = await fetch(saveUrl, {
+                method: editNoteIdx !== null ? 'PUT' : 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(editor.value)
             });
@@ -178,6 +204,8 @@
             // TODO more efficient way to do this than reloading all notes every time
             if (saveResponse.ok) {
                 editor.value = '';
+                editNoteIdx = null;
+                cancelButton.classList.add('hidden');
                 displayNotes();
             }
         }
@@ -198,6 +226,32 @@
             } else {
                 alert('Failed to delete note');
             }
+        }
+
+        // copies contexts of note with index `idx` into editor
+	    function editNote(idx) {
+	        event.preventDefault();
+	        if(editor.value) {
+                if(!confirm('Are you sure you want to replace the unsaved note in the editor?')) {
+                    return;
+                }
+	        }
+
+            const contents = document.getElementById(`${idx}-contents`);
+            editor.value = contents.value;
+            editNoteIdx = idx;
+            cancelButton.classList.remove('hidden');
+            editor.scrollIntoView({ behavior: 'smooth' });
+	    }
+
+        function cancelEditingNote() {
+            event.preventDefault();
+            if(!confirm('Are you sure you want to cancel editing the current note?')) {
+                return;
+            }
+            editor.value = '';
+            editNoteIdx = null;
+            cancelButton.classList.add('hidden');
         }
 
         editor.addEventListener('input', async (e) => {
@@ -232,6 +286,10 @@
 
         submitButton.addEventListener('click', async (e) => {
             saveNotes();
+        })
+
+        cancelButton.addEventListener('click', (e) => {
+            cancelEditingNote();
         })
 
         editor.addEventListener('paste', (e) => {

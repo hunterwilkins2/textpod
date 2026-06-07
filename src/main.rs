@@ -87,6 +87,7 @@ const CONTENT_LENGTH_LIMIT: usize = 500 * 1024 * 1024; // allow uploading up to 
 
 #[tokio::main]
 async fn main() {
+    info!("starting");
     tracing_subscriber::fmt::init();
 
     let args = Args::parse();
@@ -141,8 +142,8 @@ async fn main() {
         .route("/notes", get(get_notes).post(save_note))
         .route(
             "/notes/:index",
-            get(get_note_by_index).delete(delete_note_by_index),
-        ) // TODO PUT/PATCH
+            get(get_note_by_index).put(update_note_by_index).delete(delete_note_by_index),
+        ) // TODO PATCH
         .route("/upload", post(upload_file))
         .layer(DefaultBodyLimit::max(CONTENT_LENGTH_LIMIT))
         .nest_service("/attachments", ServeDir::new("attachments"))
@@ -200,7 +201,7 @@ fn load_notes(file: &PathBuf) -> Vec<Note> {
                         (timestamp.trim().to_string(), content.trim().to_string())
                     }
                     _ => (
-                        Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
+                        Local::now().format("%Y-%m-%d %l:%M:%S").to_string(),
                         block.to_string(),
                     ),
                 };
@@ -243,6 +244,119 @@ async fn get_note_by_index(
     }
 
     return Ok(Json(notes.iter().collect::<Vec<_>>()[index].clone()));
+}
+
+// PUT /notes/:index
+async fn update_note_by_index(
+    State(state): State<AppState>,
+    Path(index): Path<usize>,
+    Json(content): Json<String>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let mut notes = state.notes.lock().unwrap();
+    if index >= notes.len() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            format!("request for non-existent note #{index}"),
+        ));
+    }
+
+    let mut content = content.clone();
+
+    // Replace "---" with "<hr>" in the content
+    content = content.replace("---", "<hr>");
+    let links_to_download: Vec<String> = content
+        .split_whitespace()
+        .filter(|word| word.starts_with("+http"))
+        .map(|s| s.to_string())
+        .collect();
+
+    fs::create_dir_all("attachments/webpages").unwrap();
+
+    for link in &links_to_download {
+        let url = &link[1..];
+        let escaped_filename = url_to_safe_filename(url);
+        let filepath = format!("attachments/webpages/{}.html", escaped_filename);
+        content = content.replace(link, &format!("{} ([local copy](/{}))", url, filepath));
+    }
+
+    let timestamp = Local::now().format("%Y-%m-%d %l:%M:%S").to_string();
+    let html = md_to_html(&content); // Changed to pass a reference
+    let note = Note {
+        timestamp: timestamp.clone(),
+        content: content.clone(),
+        html,
+    };
+
+    notes[index] = note;
+
+    // Update the notes file
+    let content = notes
+        .iter()
+        .map(|note| format!("{}\n{}\n\n---\n\n", note.timestamp, note.content))
+        .collect::<String>();
+
+    if let Err(e) = fs::write(&state.notes_file, content) {
+        return Err((StatusCode::INTERNAL_SERVER_ERROR, e.to_string()));
+    }
+
+    info!("Note updated: {}", index);
+
+    if !links_to_download.is_empty() {
+        let notes = state.notes.clone();
+        spawn(async move {
+            for link in links_to_download {
+                let url = &link[1..];
+                let escaped_filename = url_to_safe_filename(url);
+                let filepath = format!("attachments/webpages/{}.html", escaped_filename);
+
+                let result = Command::new("monolith")
+                    .args(&[url, "-o", &filepath])
+                    .output()
+                    .await;
+
+                info!("Downloading webpage: {}", url);
+
+                if result.is_err() {
+                    error!("Failed to download webpage: {}", url);
+                    let mut notes_lock = notes.lock().unwrap();
+                    if let Some(last_note) = notes_lock.last_mut() {
+                        let updated_content = last_note.content.replace(
+                            &format!("([local copy](/{}))", filepath),
+                            "(local copy failed)",
+                        );
+                        last_note.content = updated_content.clone();
+                        last_note.html = md_to_html(&updated_content); // Changed to pass a reference here too
+
+                        drop(notes_lock);
+
+                        if let Ok(file_content) = fs::read_to_string(&state.notes_file) {
+                            let notes_lock = notes.lock().unwrap();
+                            let updated_content: Vec<String> = file_content
+                                .split("\n---\n")
+                                .enumerate()
+                                .map(|(i, note_content)| {
+                                    if i == notes_lock.len() - 1 {
+                                        format!("{}\n{}", timestamp, updated_content)
+                                    } else {
+                                        note_content.to_string()
+                                    }
+                                })
+                                .collect();
+                            drop(notes_lock);
+
+                            if let Ok(mut file) = fs::File::create(&state.notes_file) {
+                                for note_content in updated_content {
+                                    writeln!(file, "{}\n---", note_content).ok();
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    return Ok(StatusCode::NO_CONTENT);
 }
 
 // DELETE /notes/:index
@@ -300,7 +414,7 @@ async fn save_note(
         content = content.replace(link, &format!("{} ([local copy](/{}))", url, filepath));
     }
 
-    let timestamp = Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+    let timestamp = Local::now().format("%Y-%m-%d %l:%M:%S").to_string();
     let html = md_to_html(&content); // Changed to pass a reference
     let note = Note {
         timestamp: timestamp.clone(),
