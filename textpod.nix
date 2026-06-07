@@ -32,6 +32,10 @@
       textpod
     ];
 
+    systemd.tmpfiles.rules = [
+      "d ${config.services.textpod.directory} 0755 ${config.services.textpod.user} ${config.services.textpod.user} - -"
+    ];
+
     systemd.services.textpod = {
       description = "Textpod notes app";
       wantedBy = [ "multi-user.target" ];
